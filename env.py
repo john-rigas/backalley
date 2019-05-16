@@ -4,6 +4,7 @@ from gym.utils import seeding
 import random
 from utils import Deck, CARD_TABLE, RANK_TABLE, SUIT_TABLE
 import utils
+import numpy as np
 
 
 RANKINGS = ['2','3','4','5','6','7','8','9','T','J','Q','K','A']
@@ -51,7 +52,7 @@ class BackalleyEnv(gym.Env):
         return self._get_obs()
 
     def step(self, action):
-        #assert self.action_space.contains(action)
+        assert self.action_space.contains(action)
         done = False
         if self.round == 0:
             if action[0] < 0 or action[0] > self.hand:
@@ -177,7 +178,8 @@ class BackalleyEnv(gym.Env):
     def _check_trump(self, card, idx):
          return (card[1] == self.trump[1] and 
                     not self.trump_thrown and 
-                    not all(c[1] == self.trump[1] for c in self.cards_in_hand[idx]))
+                    not all(c[1] == self.trump[1] for c in self.cards_in_hand[idx])
+                    and (any(c[1] == self.cards_played[self.round - 1][self.starting_player][1] for c in self.cards_in_hand[idx]) if self.starting_player != idx else True))
 
     def _check_leading_suit(self, card, idx):
         return ((card[1] != self.cards_played[self.round - 1][self.starting_player][1] and 
@@ -211,7 +213,7 @@ if __name__ == '__main__':
             no_bid = True
             while no_bid:
                 try:
-                    obs, reward, done, _ = env.step((int(input("Place bid: ")), (0,0)))
+                    obs, reward, done, _ = env.step([int(input("Place bid: ")), np.array([0,0])])
                     no_bid = False
                 except utils.BidError:
                     print ('Bidding Error')
@@ -222,8 +224,8 @@ if __name__ == '__main__':
                     card = input("Pick a card to throw: ")
                     if card not in Deck().cards:
                         raise utils.NoCardError
-                    discrete_action = (CARD_TABLE[card[0]], CARD_TABLE[card[1]])
-                    obs, reward, done, _ = env.step((0, discrete_action))
+                    discrete_action = [CARD_TABLE[card[0]], CARD_TABLE[card[1]]]
+                    obs, reward, done, _ = env.step([0, np.array(discrete_action)])
                     no_card = False
                 except utils.CardChoiceError:
                     print ('Card Choice Error')
