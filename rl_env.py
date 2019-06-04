@@ -28,7 +28,8 @@ class BackalleyEnv(gym.Env):
                 )]) * self.hand
             ),
             spaces.Tuple(tuple([spaces.Discrete(self.hand + 2)] * self.num_players)), # bids, 0- hand no for bid vals, hand no + 1 if null
-            spaces.Discrete(self.num_players) # seat location
+            spaces.Discrete(self.num_players), # seat location
+            spaces.MultiBinary(len(RANKINGS)*len(SUITS)) # my hand, 0 if in hand, 1 if not
             ))
         self.seed()
 
@@ -40,48 +41,55 @@ class BackalleyEnv(gym.Env):
         self.cards_in_hand = [[] for _ in range(self.num_players)]
         self.deck.reset()
         self.round = 0
-        self.starting_player = 0
+        self.starting_player = random.randint(0, self.num_players - 1)
+        self.current_seat = self.starting_player
         self._deal()
         self.last_winner = None
         self.cards_played = [['XY' for player in range(self.num_players)] for card in range(self.hand)]
-        self.seat_location = random.randint(0, self.num_players - 1) # shouldnt be random
+        #self.seat_location = random.randint(0, self.num_players - 1) # shouldnt be random
         self.bids = [self.hand + 1 for p in range(0, self.num_players)]
-        self._make_random_bids(0, self.seat_location)
+        #self._make_random_bids(0, self.seat_location)
         self.trumps_won = [0 for _ in range(self.num_players)]
         self.points = [0 for _ in range(self.num_players)]
         return self._get_obs()
 
     def step(self, action):
-        assert self.action_space.contains(action)
+        #assert self.action_space.contains(action)
         done = False
         if self.round == 0:
             if action[0] < 0 or action[0] > self.hand:
                 raise utils.BidOutOfBoundsError(self.hand)
-            if self.seat_location == self.num_players - 1 and sum(self.bids[:-1]) + action[0] == self.hand:
+            if self.current_seat == self.num_players - 1 and sum(self.bids[:-1]) + action[0] == self.hand:
                 raise utils.BidNotAllowedError(action[0], self.hand)
-            self.bids[self.seat_location] = action[0]
-            self._make_random_bids(self.seat_location + 1, self.num_players)
+            self.bids[self.current_seat] = action[0]
+            self.current_seat = (self.current_seat + 1) % self.num_players
+            if self.current_seat == self.starting_player:
+                self.round += 1
+            #self._make_random_bids(self.seat_location + 1, self.num_players)
         else:
             card = self._convert_action_to_card(action[1])
-            if card not in self.cards_in_hand[self.seat_location]:
+            if card not in self.cards_in_hand[self.current_seat]:
                 raise utils.CardNotInHandError
-            if self._check_trump(card, self.seat_location):
+            if self._check_trump(card, self.current_seat):
                 raise utils.TrumpNotThrownError(self.trump[1])
-            if self._check_leading_suit(card, self.seat_location):
+            if self._check_leading_suit(card, self.current_seat):
                 raise utils.NotLeadingSuitError(self.cards_played[self.round - 1][self.starting_player][1])
             
-            self.cards_played[self.round - 1][self.seat_location] = self._throw_card(self.seat_location, card)
-            self._finish_round()
-            self.last_winner = self._determine_round_winner()
-            self.render()
-            self.starting_player = self.last_winner
-        if self.round == self.hand:
-            done = True
-            self.points = self._tally_points()
-        else:
-            self.round += 1
-            self._start_new_round()
-        return self._get_obs(), self.points[self.seat_location], done, {}
+            self.cards_played[self.round - 1][self.current_seat] = self._throw_card(self.current_seat, card)
+            #self._finish_round()
+            self.current_seat = (self.current_seat + 1) % self.num_players
+            if self.current_seat == self.starting_player:
+                self.last_winner = self._determine_round_winner()
+                self.render()
+                self.starting_player = self.last_winner
+                self.current_seat = self.starting_player
+                if self.round == self.hand:
+                    done = True
+                    self.points = self._tally_points()
+                else:
+                    self.round += 1
+            #self._start_new_round()
+        return self._get_obs(), self.points, done, {}
 
     def render(self):
         print ()
@@ -89,12 +97,19 @@ class BackalleyEnv(gym.Env):
         print ('Trump: ', self.trump)
         print ()
         for idx in range(self.num_players):
-            print ('{}{}{}Player {} threw {}'.format('(S)' if self.starting_player == idx else '   ',
-                                                    '(U)' if self.seat_location == idx else '   ',
+            print ('{}{}Player {} threw {}'.format('(S)' if self.starting_player == idx else '   ',
                                                     '(W) ' if self.last_winner == idx else '    ',
                                                     idx,
                                                     self.cards_played[self.round - 1][idx]))
         print ()
+
+    def get_playable_cards(self):
+        playable = []
+        cards = self.cards_in_hand[self.current_seat]
+        for card in cards:
+            if not self._check_trump(card, self.current_seat) and not self._check_leading_suit(card, self.current_seat):
+                playable.append(card)
+        return [self._convert_card(card) for card in playable]
 
     def _deal(self):
         self.trump = self.deck.draw()
@@ -106,10 +121,16 @@ class BackalleyEnv(gym.Env):
         return (self.trump,
                 self._get_discrete_cards_played(),
                 self.bids,
-                self.seat_location)
+                self.current_seat,
+                self._get_binary_player_hand())
 
     def _get_discrete_cards_played(self):
         return [[self._convert_card(card) for card in r] for r in self.cards_played]
+
+    def _get_binary_player_hand(self):
+        player_hand = [utils.get_binary(card) for card in self.cards_in_hand[self.current_seat]]
+        binary_hand = [1 if i in player_hand else 0 for i in range(len(RANKINGS)*len(SUITS))]
+        return binary_hand
 
     def _convert_card(self, card):
         return (CARD_TABLE[card[0]], CARD_TABLE[card[1]])
@@ -188,47 +209,49 @@ class BackalleyEnv(gym.Env):
 
     def _print_user_status(self):
         print ()
-        print ('Trump: {}, Your Bid: {}, Hands Won: {} '.format(self.trump,
-                                                                self.bids[self.seat_location] if self.round != 0 else None,
-                                                                self.trumps_won[self.seat_location]))
+        print ('Player: {}, Trump: {}, Your Bid: {}, Hands Won: {} '.format(self.current_seat,
+                                                                self.trump,
+                                                                self.bids[self.current_seat] if self.round != 0 else None,
+                                                                self.trumps_won[self.current_seat]))
         print ()
         for idx in range(self.num_players):
-            print ('Player {} with bid of {} threw {}'.format(idx if idx != self.seat_location else 'U',
+            print ('Player {} with bid of {} threw {}'.format(idx,
                                                             self.bids[idx] if self.bids[idx] != self.hand + 1 else '--',
                                                             self.cards_played[self.round - 1][idx] if self.cards_played[self.round - 1][idx] != 'XY' else '--'))     
         print ()                                         
         print ('Your cards are: ')
-        cards = self.cards_in_hand[env.seat_location]
+        cards = self.cards_in_hand[self.current_seat]
         for suit in SUITS:
             print ('{}:  {}'.format(suit, ', '.join(sorted([card for card in cards if card[1] == suit]))))
         print ()
         
 
 if __name__ == '__main__':
-    env = BackalleyEnv()
+    env = BackalleyEnv(hand = 4)
     obs = env.reset()
     for r in range(env.hand + 1):
-        env._print_user_status()
-        if r == 0:
-            no_bid = True
-            while no_bid:
-                try:
-                    obs, reward, done, _ = env.step([int(input("Place bid: ")), np.array([0,0])])
-                    no_bid = False
-                except utils.BidError:
-                    print ('Bidding Error')
-        else:
-            no_card = True
-            while no_card:
-                try:
-                    card = input("Pick a card to throw: ")
-                    if card not in Deck().cards:
-                        raise utils.NoCardError
-                    discrete_action = [CARD_TABLE[card[0]], CARD_TABLE[card[1]]]
-                    obs, reward, done, _ = env.step([0, np.array(discrete_action)])
-                    no_card = False
-                except utils.CardChoiceError:
-                    print ('Card Choice Error')
+        for player in range(env.num_players):
+            env._print_user_status()
+            if r == 0:
+                no_bid = True
+                while no_bid:
+                    try:
+                        obs, reward, done, _ = env.step([int(input("Place bid: ")), np.array([0,0])])
+                        no_bid = False
+                    except utils.BidError:
+                        print ('Bidding Error')
+            else:
+                no_card = True
+                while no_card:
+                    try:
+                        card = input("Pick a card to throw: ")
+                        if card not in Deck().cards:
+                            raise utils.NoCardError
+                        discrete_action = [CARD_TABLE[card[0]], CARD_TABLE[card[1]]]
+                        obs, reward, done, _ = env.step([0, np.array(discrete_action)])
+                        no_card = False
+                    except utils.CardChoiceError:
+                        print ('Card Choice Error')
 
     print ('Results: ')
     for idx in range(env.num_players):

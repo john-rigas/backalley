@@ -39,6 +39,12 @@ CARD_TABLE = {
 RANK_TABLE = {v:k for k,v in CARD_TABLE.items() if k in RANKINGS}
 SUIT_TABLE = {v:k for k,v in CARD_TABLE.items() if k in SUITS}
 
+def get_binary(card):
+    return CARD_TABLE[card[1]]*13 + CARD_TABLE[card[0]]
+
+def get_binary_from_discrete(card):
+    return card[1]*13 + card[0]
+
 class BackalleyError(Exception):
     pass
 
