@@ -29,7 +29,8 @@ class BackalleyEnv(gym.Env):
             ),
             spaces.Tuple(tuple([spaces.Discrete(self.hand + 2)] * self.num_players)), # bids, 0- hand no for bid vals, hand no + 1 if null
             spaces.Discrete(self.num_players), # seat location
-            spaces.MultiBinary(len(RANKINGS)*len(SUITS)) # my hand, 0 if in hand, 1 if not
+            spaces.MultiBinary(len(RANKINGS)*len(SUITS)), # my hand, 0 if in hand, 1 if not
+            spaces.MultiBinary(len(SUITS))
             ))
         self.seed()
 
@@ -80,7 +81,7 @@ class BackalleyEnv(gym.Env):
             self.current_seat = (self.current_seat + 1) % self.num_players
             if self.current_seat == self.starting_player:
                 self.last_winner = self._determine_round_winner()
-                self.render()
+                #self.render()
                 self.starting_player = self.last_winner
                 self.current_seat = self.starting_player
                 if self.round == self.hand:
@@ -103,6 +104,17 @@ class BackalleyEnv(gym.Env):
                                                     self.cards_played[self.round - 1][idx]))
         print ()
 
+    def _suits_throwable(self):
+        throwable = []
+        for suit in SUITS:
+            if self._check_leading_suit('2'+suit, self.current_seat):
+                throwable.append(0)
+            elif self._check_trump('2'+suit, self.current_seat):
+                throwable.append(0)
+            else:
+                throwable.append(1)
+        return throwable
+
     def get_playable_cards(self):
         playable = []
         cards = self.cards_in_hand[self.current_seat]
@@ -118,11 +130,15 @@ class BackalleyEnv(gym.Env):
                 self.cards_in_hand[idx].append(self.deck.draw())
 
     def _get_obs(self):
-        return (self.trump,
+        return (self._get_discrete_trump(),
                 self._get_discrete_cards_played(),
                 self.bids,
                 self.current_seat,
-                self._get_binary_player_hand())
+                self._get_binary_player_hand(),
+                self._suits_throwable())
+
+    def _get_discrete_trump(self):
+        return self._convert_card(self.trump)
 
     def _get_discrete_cards_played(self):
         return [[self._convert_card(card) for card in r] for r in self.cards_played]
@@ -141,22 +157,6 @@ class BackalleyEnv(gym.Env):
 
     def _tally_points(self):
         return [t + 10 if t == b else t for t,b in zip(self.trumps_won, self.bids)]
-
-    def _finish_round(self):
-        if self.seat_location <self.starting_player:
-            players_after = list(range(self.seat_location + 1, self.starting_player))
-        else:
-            players_after = list(range(self.seat_location + 1, self.num_players)) + list(range(0, self.starting_player))
-        for idx in players_after:
-            self.cards_played[self.round - 1][idx] = self._throw_card_randomly(idx)
-
-    def _start_new_round(self):
-        if self.seat_location < self.starting_player:
-            players_before = list(range(self.starting_player, self.num_players)) + list(range(0, self.seat_location))
-        else:
-            players_before = list(range(self.starting_player, self.seat_location))   
-        for idx in players_before:
-            self.cards_played[self.round - 1][idx] = self._throw_card_randomly(idx)
 
     def _determine_round_winner(self):
         order = list(range(self.starting_player, self.num_players)) + list(range(0, self.starting_player))

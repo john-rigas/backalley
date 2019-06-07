@@ -17,7 +17,6 @@ class RandomPlayer(Player):
         pass
     
     def act(self, obs, playable_cards, round):
-        trump, cards_played, bids, seat, hand = obs
         if round == 0:
             return [3, np.array([0,0])]
         else:
